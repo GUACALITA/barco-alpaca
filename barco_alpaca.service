@@ -1,0 +1,17 @@
+[Unit]
+Description=BARCO-Alpaca — Autonomous Alpaca Trading Agent
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/trading_agent_alpaca
+EnvironmentFile=/root/trading_agent_alpaca/.env
+ExecStart=/root/trading_agent_alpaca/venv/bin/python main_alpaca.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
