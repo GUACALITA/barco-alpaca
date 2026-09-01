@@ -6,13 +6,14 @@ Mapea activos puros (BTC, ETH...) → símbolos Alpaca (BTC/USD, ETH/USD...).
 No modifica VFZ, no toca BARCO-Binance. Solo renombra aquí.
 """
 
+import os
 import httpx
 import logging
 from datetime import datetime
 
 log = logging.getLogger("signal_connector")
 
-# Mapeo VFZ (activos puros) → símbolos Alpaca
+# Mapeo activos puros → símbolos Alpaca
 VFZ_TO_ALPACA = {
     "BTC":  "BTC/USD",
     "ETH":  "ETH/USD",
@@ -24,11 +25,11 @@ VFZ_TO_ALPACA = {
     "ADA":  "ADA/USD",
 }
 
-# URLs de servicios de inteligencia (compartidos con BARCO-Binance)
-VFZ_URL   = "http://localhost:30818/signals?limit=50"
-BRAIN_URL = "http://localhost:30843/api/status"
-S2_URL    = "http://localhost:30841/api/status"
-S3_URL    = "http://localhost:30842/api/status"
+# URLs de servicios de inteligencia — configurar en .env
+VFZ_URL   = os.environ.get("VFZ_URL",        "http://localhost:30818") + "/signals?limit=50"
+BRAIN_URL = os.environ.get("META_BRAIN_URL", "http://localhost:30843") + "/api/status"
+S2_URL    = os.environ.get("S2_URL",         "http://localhost:30841") + "/api/status"
+S3_URL    = os.environ.get("S3_URL",         "http://localhost:30842") + "/api/status"
 
 OPTIMAL_THRESHOLD = 0.35
 AVOID_THRESHOLD   = -0.25
