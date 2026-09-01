@@ -133,13 +133,19 @@ async def monitor_loop():
             state["positions"] = positions
 
             for pos in positions:
-                sym    = pos.get("symbol", "")
-                qty    = float(pos.get("qty", 0))
-                avg_in = float(pos.get("avg_entry_price", 0))
+                sym         = pos.get("symbol", "")
+                asset_class = pos.get("asset_class", "")
+                qty         = float(pos.get("qty", 0))
+                avg_in      = float(pos.get("avg_entry_price", 0))
                 if avg_in == 0 or qty == 0:
                     continue
 
-                current = await alpaca.get_price(sym)
+                # Crypto positions come as "BTCUSD" — convert to "BTC/USD" for correct endpoint
+                price_sym = sym
+                if asset_class == "crypto" and "/" not in sym:
+                    price_sym = sym[:-3] + "/" + sym[-3:]  # BTCUSD → BTC/USD
+
+                current = await alpaca.get_price(price_sym)
                 if not current:
                     continue
 

@@ -38,14 +38,13 @@ class AlpacaClient:
             async with httpx.AsyncClient(timeout=5) as c:
                 # Crypto usa endpoint diferente
                 if "/" in symbol:
-                    crypto_sym = symbol.replace("/", "")  # BTC/USD → BTCUSD
                     r = await c.get(
                         f"{DATA_URL}/v1beta3/crypto/us/latest/quotes",
-                        params={"symbols": crypto_sym},
+                        params={"symbols": symbol},  # BTC/USD con slash
                         headers=self._headers,
                     )
                     if r.status_code == 200:
-                        data = r.json().get("quotes", {}).get(crypto_sym, {})
+                        data = r.json().get("quotes", {}).get(symbol, {})
                         bid = data.get("bp", 0)
                         ask = data.get("ap", 0)
                         price = (bid + ask) / 2 if bid and ask else 0
