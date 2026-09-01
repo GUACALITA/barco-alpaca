@@ -160,8 +160,8 @@ async def monitor_loop():
                     if asset_class == "us_option":
                         r = await alpaca.place_option_order(sym, "sell", int(qty), current)
                     else:
-                        # Usar price_sym (BTC/USD con slash) para que time_in_force=gtc en crypto
-                        r = await alpaca.place_order(price_sym, "sell", qty * current, current)
+                        # price_sym = BTC/USD → time_in_force=gtc; sell_qty evita 403 insufficient balance
+                        r = await alpaca.place_order(price_sym, "sell", qty * current, current, sell_qty=qty)
                     log_trade(sym, "sell", qty, current,
                               order_id=r.get("id"),
                               pnl=(current - avg_in) * qty,
@@ -172,8 +172,8 @@ async def monitor_loop():
                     if asset_class == "us_option":
                         r = await alpaca.place_option_order(sym, "sell", int(qty), current)
                     else:
-                        # Usar price_sym (BTC/USD con slash) para que time_in_force=gtc en crypto
-                        r = await alpaca.place_order(price_sym, "sell", qty * current, current)
+                        # price_sym = BTC/USD → time_in_force=gtc; sell_qty evita 403 insufficient balance
+                        r = await alpaca.place_order(price_sym, "sell", qty * current, current, sell_qty=qty)
                     log_trade(sym, "sell", qty, current,
                               order_id=r.get("id"),
                               pnl=(current - avg_in) * qty,

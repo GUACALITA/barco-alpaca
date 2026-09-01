@@ -178,18 +178,32 @@ class AlpacaClient:
     # ─── Órdenes stock/crypto ─────────────────────────────────────────────────
 
     async def place_order(self, symbol: str, side: str, notional: float,
-                          price: float = None) -> dict:
-        """Orden de mercado para stock o crypto por monto en dólares."""
+                          price: float = None, sell_qty: float = None) -> dict:
+        """Orden de mercado para stock o crypto.
+        Para SELLS pasar sell_qty (qty exacta de la posición) para evitar 403 insufficient balance.
+        Para BUYS usar notional (monto en dólares).
+        """
         if not self._has_keys():
             return self._fake_fill(symbol, side, notional, price)
 
-        data = {
-            "symbol":        symbol,
-            "side":          side.lower(),
-            "type":          "market",
-            "time_in_force": "gtc" if "/" in symbol else "day",
-            "notional":      str(round(notional, 2)),
-        }
+        tif = "gtc" if "/" in symbol else "day"
+        if side.lower() == "sell" and sell_qty is not None:
+            # Usar qty exacta de la posición — evita "insufficient balance" por redondeo
+            data = {
+                "symbol":        symbol,
+                "side":          "sell",
+                "type":          "market",
+                "time_in_force": tif,
+                "qty":           str(sell_qty),
+            }
+        else:
+            data = {
+                "symbol":        symbol,
+                "side":          side.lower(),
+                "type":          "market",
+                "time_in_force": tif,
+                "notional":      str(round(notional, 2)),
+            }
         try:
             async with httpx.AsyncClient(timeout=10) as c:
                 r = await c.post(
