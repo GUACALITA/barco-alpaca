@@ -130,7 +130,10 @@ async def monitor_loop():
     while state["running"]:
         try:
             positions = await alpaca.get_positions()
-            state["positions"] = positions
+            # Solo actualizar cache si la respuesta es válida (no vacía por error transitorio)
+            acc_lmv = float((await alpaca.get_account()).get("long_market_value", 1))
+            if positions or acc_lmv == 0:
+                state["positions"] = positions
 
             for pos in positions:
                 sym         = pos.get("symbol", "")
