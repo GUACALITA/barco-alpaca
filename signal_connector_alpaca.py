@@ -30,7 +30,7 @@ BRAIN_URL = "http://localhost:30843/api/status"
 S2_URL    = "http://localhost:30841/api/status"
 S3_URL    = "http://localhost:30842/api/status"
 
-OPTIMAL_THRESHOLD = 0.25
+OPTIMAL_THRESHOLD = 0.35
 AVOID_THRESHOLD   = -0.25
 
 
