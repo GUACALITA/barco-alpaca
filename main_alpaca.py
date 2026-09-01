@@ -7,7 +7,7 @@ Tres loops en paralelo:
   Loop 3: FastAPI Dashboard           — /health, /api/status, /api/log, /api/signals
 """
 
-import os, asyncio, logging
+import os, asyncio, logging, time
 from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -125,10 +125,27 @@ async def claude_brain_loop():
 
 # ─── Loop 2: Monitor Python (cada 30s, sin Claude) ───────────────────────────
 
+_vfz_cache: dict = {}
+_vfz_cache_ts: float = 0.0
+_VFZ_REFRESH_SECS = 60.0
+_sold_cooldown: dict = {}  # sym → timestamp, evita doble-venta mientras Alpaca procesa
+_SELL_COOLDOWN_SECS = 90.0
+
+
 async def monitor_loop():
+    global _vfz_cache, _vfz_cache_ts
     log.info(f"Monitor loop started — every {MONITOR_INTERVAL}s")
     while state["running"]:
         try:
+            # Refresh VFZ signals every 60s (lightweight, solo localhost)
+            if time.time() - _vfz_cache_ts > _VFZ_REFRESH_SECS:
+                try:
+                    sig = await collect_signals()
+                    _vfz_cache = sig.get("vfz_signals", {})
+                    _vfz_cache_ts = time.time()
+                except Exception as e:
+                    log.debug(f"VFZ refresh: {e}")
+
             positions = await alpaca.get_positions()
             # Solo actualizar cache si la respuesta es válida (no vacía por error transitorio)
             acc_lmv = float((await alpaca.get_account()).get("long_market_value", 1))
@@ -143,6 +160,10 @@ async def monitor_loop():
                 if avg_in == 0 or qty == 0:
                     continue
 
+                # Skip si vendimos este símbolo recientemente (evita doble-orden mientras Alpaca procesa)
+                if time.time() - _sold_cooldown.get(sym, 0) < _SELL_COOLDOWN_SECS:
+                    continue
+
                 # Crypto positions come as "BTCUSD" — convert to "BTC/USD" for correct endpoint
                 price_sym = sym
                 if asset_class == "crypto" and "/" not in sym:
@@ -155,25 +176,30 @@ async def monitor_loop():
                 pnl_pct    = (current - avg_in) / avg_in
                 asset_class = pos.get("asset_class", "")
 
-                if pnl_pct < STOP_LOSS_PCT:
-                    log.warning(f"STOP-LOSS {sym}: {pnl_pct:.1%}")
+                # VFZ SELL exit: si VFZ dice SELL y la posición pierde → salir sin esperar -3%
+                vfz_signal = _vfz_cache.get(price_sym)
+                vfz_exit   = (vfz_signal == "SELL" and pnl_pct < 0)
+
+                if pnl_pct < STOP_LOSS_PCT or vfz_exit:
+                    trade_type = "stop_loss" if pnl_pct < STOP_LOSS_PCT else "vfz_sell_exit"
+                    log.warning(f"{trade_type.upper()} {sym}: {pnl_pct:.1%} VFZ={vfz_signal}")
                     if asset_class == "us_option":
                         r = await alpaca.place_option_order(sym, "sell", int(qty), current)
                     else:
-                        # price_sym = BTC/USD → time_in_force=gtc; sell_qty evita 403 insufficient balance
                         r = await alpaca.place_order(price_sym, "sell", qty * current, current, sell_qty=qty)
+                    _sold_cooldown[sym] = time.time()
                     log_trade(sym, "sell", qty, current,
                               order_id=r.get("id"),
                               pnl=(current - avg_in) * qty,
-                              trade_type="stop_loss")
+                              trade_type=trade_type)
 
                 elif pnl_pct > TAKE_PROFIT_PCT:
                     log.info(f"TAKE-PROFIT {sym}: {pnl_pct:.1%}")
                     if asset_class == "us_option":
                         r = await alpaca.place_option_order(sym, "sell", int(qty), current)
                     else:
-                        # price_sym = BTC/USD → time_in_force=gtc; sell_qty evita 403 insufficient balance
                         r = await alpaca.place_order(price_sym, "sell", qty * current, current, sell_qty=qty)
+                    _sold_cooldown[sym] = time.time()
                     log_trade(sym, "sell", qty, current,
                               order_id=r.get("id"),
                               pnl=(current - avg_in) * qty,
