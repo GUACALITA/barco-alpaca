@@ -24,17 +24,63 @@ VFZ_TO_ALPACA = {
     "ADA":  "ADA/USD",
 }
 
-# URLs de servicios de inteligencia (compartidos con BARCO-Binance, no duplicar)
-VFZ_URL    = "http://localhost:30818/signals?limit=50"
-BRAIN_URL  = "http://localhost:30843/api/status"
-S2_URL     = "http://localhost:30841/api/status"
-S3_URL     = "http://localhost:30842/api/status"
+# URLs de servicios de inteligencia (compartidos con BARCO-Binance)
+VFZ_URL   = "http://localhost:30818/signals?limit=50"
+BRAIN_URL = "http://localhost:30843/api/status"
+S2_URL    = "http://localhost:30841/api/status"
+S3_URL    = "http://localhost:30842/api/status"
+
+OPTIMAL_THRESHOLD = 0.25
+AVOID_THRESHOLD   = -0.25
+
+
+def _local_meta(vfz_signals: dict, s2_data: dict, s3_data: dict,
+                brain_inputs: dict = None) -> tuple:
+    """
+    Computa un score local desde VFZ + S2 + S3 (sin S1 arbitraje Binance).
+    VecFrachZ no es considerado por el Meta-Brain — lo agregamos aquí.
+
+    Usa el avg_pressure del Meta-Brain cuando S2 ok=True (lectura más estable).
+    Retorna (label: str, score: float)
+    """
+    # VFZ: ratio de BUY vs total → -1..+1
+    total = len(vfz_signals)
+    buys  = sum(1 for v in vfz_signals.values() if v == "BUY")
+    vfz_score = ((buys / total) * 2 - 1) if total else 0.0
+
+    # S2: preferir avg del Meta-Brain (más estable) si disponible
+    brain_s2  = (brain_inputs or {}).get("s2", {})
+    if brain_s2.get("ok") and brain_s2.get("avg_pressure") is not None:
+        avg_p = brain_s2["avg_pressure"]
+    else:
+        avg_p = s2_data.get("avg_pressure")
+    s2_score = (avg_p - 0.5) * 2 if avg_p is not None else 0.0
+
+    # S3: Fear & Greed 0-100 → -1..+1  (campo real: "fng_value")
+    brain_s3  = (brain_inputs or {}).get("s3", {})
+    fng       = (brain_s3.get("fng_value") if brain_s3.get("ok")
+                 else s3_data.get("fng_value") or s3_data.get("fear_greed"))
+    s3_score  = ((fng - 50) / 50) if fng is not None else 0.0
+
+    # Pesos: VFZ=30%, S2=40%, S3=30%  (S1 Binance arbitraje excluido)
+    score = vfz_score * 0.30 + s2_score * 0.40 + s3_score * 0.30
+    score = max(-1.0, min(1.0, score))
+
+    if score >= OPTIMAL_THRESHOLD:
+        label = "OPTIMAL"
+    elif score <= AVOID_THRESHOLD:
+        label = "AVOID"
+    else:
+        label = "NEUTRAL"
+
+    return label, round(score, 3)
 
 
 async def collect_signals() -> dict:
     """
     Consulta todos los servicios de inteligencia del VPS y devuelve
     señales mapeadas a símbolos de Alpaca.
+    Computa score local cuando el Meta-Brain no puede leer S2/S3.
     """
     async with httpx.AsyncClient(timeout=5) as c:
         try:
@@ -65,78 +111,120 @@ async def collect_signals() -> dict:
             log.warning(f"S3 unreachable: {e}")
             s3_data = {}
 
-    # Señales VFZ: {"BTC": "BUY", "SOL": "SELL", ...}
-    # Las convertimos a símbolos Alpaca: {"BTC/USD": "BUY", "SOL/USD": "SELL", ...}
+    # Señales VFZ → símbolos Alpaca
     raw_signals = {}
     for item in vfz_data.get("signals", []):
-        asset  = item.get("symbol", "")        # "BTC", "ETH", etc.
-        action = item.get("signal", "HOLD")     # "BUY" | "SELL" | "HOLD"
+        asset  = item.get("symbol", "")
+        action = item.get("signal", "HOLD")
         if asset in VFZ_TO_ALPACA:
-            alpaca_sym = VFZ_TO_ALPACA[asset]
-            raw_signals[alpaca_sym] = action
+            raw_signals[VFZ_TO_ALPACA[asset]] = action
+
+    # S2 — nombres de campo reales del servicio
+    s2_avg_pressure = s2_data.get("avg_pressure")                                   # 0.0–1.0
+    s2_signal       = s2_data.get("last_signal", "NEUTRAL")                         # OPTIMAL|NEUTRAL
+    s2_pressure_map = s2_data.get("pressure_by_symbol", s2_data.get("pressure", {}))
+
+    # S3 — nombres de campo reales del servicio
+    fng_value  = s3_data.get("fng_value") or s3_data.get("fear_greed", 50)
+    headlines  = s3_data.get("last_headlines", s3_data.get("headlines", []))
+
+    # Score local: VFZ + S2 + S3 (excluye S1/Binance arbitraje, incluye VecFrachZ)
+    brain_inputs = brain_data.get("inputs", {})
+    local_label, local_score = _local_meta(raw_signals, s2_data, s3_data, brain_inputs)
+
+    brain_label = brain_data.get("last_rec", brain_data.get("recommendation", "NEUTRAL"))
+    brain_score = brain_data.get("last_score", brain_data.get("score", 0.0))
+
+    # Usar score local si indica OPTIMAL (VFZ agrega señal que Meta-Brain no considera)
+    if local_label == "OPTIMAL" and len(raw_signals) > 0:
+        meta_label = local_label
+        meta_score = local_score
+        log.info(
+            f"VFZ+S2+S3 local score OPTIMAL ({local_score:.3f}) "
+            f"→ overriding Meta-Brain NEUTRAL ({brain_score:.3f})"
+        )
+    else:
+        meta_label = brain_label
+        meta_score = brain_score
 
     return {
-        # Señales crypto en formato Alpaca
-        "vfz_signals":   raw_signals,           # {"BTC/USD": "BUY", ...}
-
-        # Meta-Brain
-        "meta_brain":    brain_data.get("recommendation", "NEUTRAL"),  # AVOID|NEUTRAL|OPTIMAL
-        "meta_score":    brain_data.get("score", 0.0),                 # -1.0 → +1.0
-
-        # S2 OrderBook CNN — presión compradora 0-1 por símbolo
-        "s2_pressure":   s2_data.get("pressure", {}),
-
-        # S3 NLP Sentiment
-        "s3_sentiment":  s3_data.get("fear_greed", 50),   # 0-100
-        "s3_headlines":  s3_data.get("headlines", []),
-
-        "timestamp": datetime.utcnow().isoformat(),
+        "vfz_signals":      raw_signals,
+        "meta_brain":       meta_label,
+        "meta_score":       meta_score,
+        "s2_pressure":      s2_pressure_map,
+        "s2_avg_pressure":  s2_avg_pressure,
+        "s2_signal":        s2_signal,
+        "s3_sentiment":     fng_value,
+        "s3_headlines":     headlines,
+        "local_meta_label": local_label,
+        "local_meta_score": local_score,
+        "timestamp":        datetime.utcnow().isoformat(),
     }
 
 
 def should_buy(symbol: str, signals: dict) -> bool:
     """
     Devuelve True si las señales permiten comprar `symbol`.
-
-    Reglas:
-    - Si Meta-Brain == AVOID → nunca comprar
-    - Si VFZ dice SELL para el símbolo → no comprar
-    - Resto → permitido
+    Bloquea en AVOID o si VFZ dice SELL para el símbolo.
     """
     if signals.get("meta_brain") == "AVOID":
         return False
-
-    # Para crypto: chequear señal VFZ directa
     vfz = signals.get("vfz_signals", {})
     if symbol in vfz and vfz[symbol] == "SELL":
         return False
-
     return True
 
 
 def format_signals_for_claude(signals: dict) -> str:
-    """Formatea las señales para el system prompt de Claude Brain."""
+    """Formatea las señales para el user message de Claude Brain."""
     vfz_lines = "\n".join(
         f"  {sym}: {action}"
         for sym, action in signals.get("vfz_signals", {}).items()
     )
-    pressure_lines = "\n".join(
-        f"  {sym}: {val:.2f}"
-        for sym, val in signals.get("s2_pressure", {}).items()
-    )
-    headlines = "\n".join(
-        f"  - {h}" for h in signals.get("s3_headlines", [])[:5]
+
+    # S2: mostrar avg_pressure y señal directa
+    s2_avg = signals.get("s2_avg_pressure")
+    s2_sig = signals.get("s2_signal", "NEUTRAL")
+    if s2_avg is not None:
+        s2_line = f"  avg_pressure: {s2_avg:.3f} → {s2_sig}"
+        per_sym = "\n".join(
+            f"    {sym}: {val:.3f}"
+            for sym, val in signals.get("s2_pressure", {}).items()
+        )
+        if per_sym:
+            s2_line += f"\n{per_sym}"
+    else:
+        s2_line = "  (no data)"
+
+    # S3: Fear & Greed con etiqueta
+    fng = signals.get("s3_sentiment", 50)
+    if fng >= 75:
+        fng_label = "EXTREME GREED"
+    elif fng >= 55:
+        fng_label = "GREED"
+    elif fng >= 45:
+        fng_label = "NEUTRAL"
+    elif fng >= 25:
+        fng_label = "FEAR"
+    else:
+        fng_label = "EXTREME FEAR"
+
+    # Headlines: soporta lista de str o de dicts
+    headline_lines = "\n".join(
+        f"  - {h.get('title', str(h)) if isinstance(h, dict) else h}"
+        for h in signals.get("s3_headlines", [])[:5]
     )
 
-    return f"""VecFrachZ Crypto Signals (Alpaca symbols):
+    return f"""VecFrachZ Crypto Signals (IBM Quantum validated):
 {vfz_lines or '  (no signals)'}
 
-Meta-Brain: {signals.get('meta_brain', 'NEUTRAL')} (score: {signals.get('meta_score', 0):.2f})
-Fear & Greed: {signals.get('s3_sentiment', 50)}/100
+Signal Gate: {signals.get('meta_brain', 'NEUTRAL')} (score: {signals.get('meta_score', 0):.3f})
 
-S2 OrderBook Pressure (0=bearish, 1=bullish):
-{pressure_lines or '  (no data)'}
+Fear & Greed Index: {fng}/100 ({fng_label})
+
+S2 OrderBook CNN (0=bearish, 1=bullish):
+{s2_line}
 
 Recent Headlines:
-{headlines or '  (none)'}
+{headline_lines or '  (none)'}
 """
