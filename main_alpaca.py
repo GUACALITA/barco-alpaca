@@ -328,7 +328,7 @@ main{padding:24px 32px;max-width:1400px;margin:0 auto}
     <div class="stat-card">
       <div class="stat-label">Open Positions</div>
       <div class="stat-val" id="pos-count">--</div>
-      <div class="stat-sub">Max 3 simultaneous</div>
+      <div class="stat-sub">Max 5 simultaneous</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Today P&amp;L</div>
@@ -388,7 +388,7 @@ async function refresh(){
     document.getElementById('portfolio-sub').className='stat-sub '+(pnl>=0?'green-text':'red-text');
     document.getElementById('cash').textContent=fmt(parseFloat(acc.cash||0));
     document.getElementById('buying-power').textContent='Buying power: '+fmt(parseFloat(acc.buying_power||0));
-    document.getElementById('pos-count').textContent=(st.positions_count||0)+' / 3';
+    document.getElementById('pos-count').textContent=(st.positions_count||0)+' / 5';
     const todayPnl=st.today_pnl||0;
     const pnlEl=document.getElementById('today-pnl');
     pnlEl.textContent=(todayPnl>=0?'+':'')+fmt(todayPnl);

@@ -47,7 +47,7 @@ DECISION FRAMEWORK:
 RISK RULES (non-negotiable):
 - NEUTRAL Signal Gate = HOLD always, no exceptions
 - Max $1,000 notional per stock/crypto trade
-- Max 3 open positions simultaneously — be selective, quality over quantity
+- Max 5 open positions simultaneously — diversify across different assets
 - NEVER buy a symbol you already hold — check "Currently holding" list first
 - Options expiry: 3-10 days out ONLY
 - Never trade if today P&L is below -$150
@@ -182,7 +182,7 @@ ACCOUNT STATUS:
 - Cash: ${float(acc.get('cash', 0)):,.2f}
 - Buying power: ${float(acc.get('buying_power', 0)):,.2f}
 - Options buying power: ${options_bp:,.2f}
-- Open positions: {len(positions)} / 3 max
+- Open positions: {len(positions)} / 5 max
 - Currently holding: {held_str}  ← DO NOT buy any of these symbols again
 - Today P&L: ${today_pnl:+,.2f}
 
