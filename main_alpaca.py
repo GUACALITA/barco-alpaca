@@ -394,11 +394,11 @@ async function refresh(){
     ['BTC','ETH','SOL'].forEach(s=>{
       const el=document.getElementById('vfz-'+s.toLowerCase());
       if(!el)return;
-      const v=vfz[s]||'--';
+      const v=vfz[s+'/USD']||'--';
       el.textContent=v;
       el.className='sig-val-chip '+chipCls(v);
     });
-    const mb=parseFloat(sig.meta_brain_score||0);
+    const mb=parseFloat(sig.meta_score||0);
     document.getElementById('meta-score').textContent=mb>=0?'+'+mb.toFixed(2):mb.toFixed(2);
     document.getElementById('meta-score').style.color=mb>0.3?'#4ade80':mb<-0.3?'#f87171':'#38bdf8';
     document.getElementById('score-fill').style.width=Math.round((mb+1)/2*100)+'%';
