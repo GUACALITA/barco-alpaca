@@ -48,6 +48,7 @@ RISK RULES (non-negotiable):
 - NEUTRAL Signal Gate = HOLD always, no exceptions
 - Max $2,000 notional per stock/crypto trade
 - Max 5 open positions simultaneously
+- NEVER buy a symbol you already hold — check "Currently holding" list first
 - Options expiry: 3-10 days out ONLY
 - Never trade if today P&L is below -$5,000
 - CRITICAL: If options_buying_power < $10,000 → no options trades
@@ -169,6 +170,9 @@ async def claude_decide(signals: dict, alpaca_client) -> dict:
     positions  = await alpaca_client.get_positions()
     options_bp = float(acc.get("options_buying_power", acc.get("buying_power", 0)))
 
+    held_symbols = [p.get("symbol", "") for p in positions]
+    held_str     = ", ".join(held_symbols) if held_symbols else "none"
+
     user_message = f"""
 MARKET INTELLIGENCE — {signals['timestamp']}
 
@@ -179,6 +183,7 @@ ACCOUNT STATUS:
 - Buying power: ${float(acc.get('buying_power', 0)):,.2f}
 - Options buying power: ${options_bp:,.2f}
 - Open positions: {len(positions)} / 5 max
+- Currently holding: {held_str}  ← DO NOT buy any of these symbols again
 - Today P&L: ${today_pnl:+,.2f}
 
 {"⛔ OPTIONS BUYING POWER TOO LOW — HOLD, do NOT call get_options_chain." if options_bp < 10000 else "Call get_options_chain for your target symbol, then respond with the decision JSON."}
