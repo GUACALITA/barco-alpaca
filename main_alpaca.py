@@ -164,16 +164,21 @@ async def monitor_loop():
                 if time.time() - _sold_cooldown.get(sym, 0) < _SELL_COOLDOWN_SECS:
                     continue
 
-                # Crypto positions come as "BTCUSD" — convert to "BTC/USD" for correct endpoint
+                # Usar current_price y unrealized_plpc de Alpaca directamente
+                # (evita discrepancia entre IEX quote mid y precio real de Alpaca)
+                current = float(pos.get("current_price", 0)) or None
+                pnl_pct = float(pos.get("unrealized_plpc", 0))
+                if not current:
+                    # Fallback: calcular desde unrealized_plpc
+                    current = avg_in * (1 + pnl_pct) if pnl_pct else None
+                    if not current:
+                        continue
+
+                # Crypto positions come as "BTCUSD" — convert to "BTC/USD" for sell order
                 price_sym = sym
                 if asset_class == "crypto" and "/" not in sym:
                     price_sym = sym[:-3] + "/" + sym[-3:]  # BTCUSD → BTC/USD
 
-                current = await alpaca.get_price(price_sym)
-                if not current:
-                    continue
-
-                pnl_pct    = (current - avg_in) / avg_in
                 asset_class = pos.get("asset_class", "")
 
                 # VFZ SELL exit: si VFZ dice SELL y la posición pierde → salir sin esperar -3%
