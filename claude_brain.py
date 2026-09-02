@@ -50,7 +50,7 @@ RISK RULES (non-negotiable):
 - Max 5 open positions simultaneously — diversify across different assets
 - NEVER buy a symbol you already hold — check "Currently holding" list first
 - Options expiry: 3-10 days out ONLY
-- Never trade if today P&L is below -$150
+- Never trade if today P&L is below -$500
 - CRITICAL: If options_buying_power < $10,000 → no options trades
 
 RESPONSE FORMAT — always valid JSON, nothing else:

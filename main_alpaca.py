@@ -57,11 +57,11 @@ async def execute_decision(decision: dict) -> dict:
     buying_power  = float(acc.get("buying_power", 0))
     portfolio_val = float(acc.get("portfolio_value", acc.get("equity", 100000)))
 
-    # Circuit breaker: no comprar si perdimos más de $150 HOY (P&L diario de Alpaca)
+    # Circuit breaker: no comprar si perdimos más de $500 HOY (P&L diario de Alpaca)
     last_eq   = float(acc.get("last_equity", portfolio_val))
     today_pnl = portfolio_val - last_eq
-    if action.startswith("BUY") and today_pnl < -150:
-        log.warning(f"CIRCUIT BREAKER: today_pnl ${today_pnl:.2f} < -$150 — BUY bloqueado hoy")
+    if action.startswith("BUY") and today_pnl < -500:
+        log.warning(f"CIRCUIT BREAKER: today_pnl ${today_pnl:.2f} < -$500 — BUY bloqueado hoy")
         return {"executed": False, "reason": f"circuit_breaker: today_pnl ${today_pnl:.2f}"}
 
     # ── Stocks y Crypto (market orders, llenan instantáneamente) ──────────────
