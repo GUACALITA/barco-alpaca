@@ -1,14 +1,14 @@
 """
-trades_db_alpaca.py — SQLite exclusivo de BARCO-Alpaca.
+trades_db_alpaca.py — SQLite database exclusively for BARCO-Alpaca.
 
-Base de datos: trades_alpaca.db  ← NUNCA escribe en trades.db (BARCO-Binance)
+Database: trades_alpaca.db  — never writes to trades.db (BARCO-Binance)
 """
 
 import sqlite3
 import os
 from datetime import datetime
 
-# DB exclusiva de BARCO-Alpaca — separada de BARCO-Binance (trades.db)
+# Exclusive DB for BARCO-Alpaca — separate from BARCO-Binance (trades.db)
 DB_PATH = os.environ.get("ALPACA_DB_PATH", "/root/trading_agent_alpaca/trades_alpaca.db")
 
 
@@ -19,7 +19,7 @@ def get_conn():
 
 
 def init_db():
-    """Crea tablas si no existen."""
+    """Create tables if they do not exist."""
     with get_conn() as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS trades (

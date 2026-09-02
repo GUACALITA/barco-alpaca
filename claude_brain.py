@@ -1,9 +1,9 @@
 """
-claude_brain.py — Loop 1: Claude decide via MCP tools cada 60 minutos.
+claude_brain.py — Loop 1: Claude decides via MCP tools every 15 minutes.
 
-Claude recibe señales VFZ+S2+S3+Meta-Brain → llama tools MCP → decide acción.
-Python ejecuta la decisión via Alpaca REST API.
-Costo estimado: ~$0.04 por ciclo (claude-opus-4-5, ~2000 tokens).
+Claude receives VFZ+S2+S3+Meta-Brain signals, calls MCP tools, returns trading decision.
+Python executes the decision via Alpaca REST API.
+Estimated cost: ~$0.04 per cycle (claude-opus-4-5, ~2000 tokens).
 """
 
 import os, json, logging
@@ -163,7 +163,7 @@ def _parse_decision(text: str) -> dict:
 
 
 async def claude_decide(signals: dict, alpaca_client) -> dict:
-    """Claude recibe señales → llama tools MCP → retorna decisión."""
+    """Claude receives signals, calls MCP tools, returns trading decision."""
     client    = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     today_pnl  = get_today_pnl()
     acc        = await alpaca_client.get_account()
@@ -191,7 +191,7 @@ ACCOUNT STATUS:
 
     messages = [{"role": "user", "content": user_message}]
 
-    # Bucle agentico — Claude puede llamar tools hasta 8 rondas
+    # Agentic loop — Claude can call tools up to 8 rounds
     for round_n in range(8):
         response = client.messages.create(
             model=CLAUDE_MODEL,
@@ -225,13 +225,13 @@ ACCOUNT STATUS:
             messages.append({"role": "user",      "content": tool_results})
             continue
 
-        break  # stop_reason desconocido
+        break  # unknown stop_reason
 
     return {"action": "HOLD", "reason": "Max rounds reached without decision"}
 
 
 async def run_claude_cycle(alpaca_client, execute_fn) -> dict:
-    """Ciclo completo: señales → decisión → ejecución → log en DB."""
+    """Full cycle: signals → decision → execution → DB log."""
     log.info("=== Claude Brain cycle start ===")
 
     signals  = await collect_signals()

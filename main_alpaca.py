@@ -1,9 +1,9 @@
 """
-main_alpaca.py — BARCO-Alpaca: agente principal en puerto 30850.
+main_alpaca.py — BARCO-Alpaca: main agent on port 30850.
 
-Tres loops en paralelo:
-  Loop 1: Claude Brain (cada 60 min)  — MCP tools → decisión → ejecución opciones
-  Loop 2: Monitor Python (cada 30s)   — stop-loss / take-profit sin Claude
+Three parallel loops:
+  Loop 1: Claude Brain (every 15 min) — MCP tools → decision → order execution
+  Loop 2: Python Monitor (every 30s)  — stop-loss / take-profit without Claude
   Loop 3: FastAPI Dashboard           — /health, /api/status, /api/log, /api/signals
 """
 
@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from signal_connector_alpaca import collect_signals
 from trades_db_alpaca import init_db, log_trade, get_today_pnl, get_recent_decisions
 from claude_brain import run_claude_cycle
-from alpaca_client_v2 import AlpacaClient  # mismo directorio en servidor
+from alpaca_client_v2 import AlpacaClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 log = logging.getLogger("barco_alpaca")
@@ -43,10 +43,10 @@ state = {
 }
 
 
-# ─── Ejecución de órdenes de opciones ────────────────────────────────────────
+# ─── Order execution ─────────────────────────────────────────────────────────
 
 async def execute_decision(decision: dict) -> dict:
-    """Ejecuta la decisión de Claude via Alpaca API (stocks, crypto u opciones)."""
+    """Executes Claude's decision via Alpaca API (stocks, crypto or options)."""
     action = decision.get("action", "HOLD")
     symbol = decision.get("symbol", "")
 
@@ -57,17 +57,17 @@ async def execute_decision(decision: dict) -> dict:
     buying_power  = float(acc.get("buying_power", 0))
     portfolio_val = float(acc.get("portfolio_value", acc.get("equity", 100000)))
 
-    # Circuit breaker: no comprar si perdimos más de $500 HOY (P&L diario de Alpaca)
+    # Circuit breaker: block buys if daily loss exceeds $500 (Alpaca daily P&L)
     last_eq   = float(acc.get("last_equity", portfolio_val))
     today_pnl = portfolio_val - last_eq
     if action.startswith("BUY") and today_pnl < -500:
-        log.warning(f"CIRCUIT BREAKER: today_pnl ${today_pnl:.2f} < -$500 — BUY bloqueado hoy")
+        log.warning(f"CIRCUIT BREAKER: today_pnl ${today_pnl:.2f} < -$500 — BUY blocked today")
         return {"executed": False, "reason": f"circuit_breaker: today_pnl ${today_pnl:.2f}"}
 
-    # ── Stocks y Crypto (market orders, llenan instantáneamente) ──────────────
+    # ── Stocks & Crypto (market orders, fill instantly) ───────────────────────
     if action in ("BUY_STOCK", "SELL_STOCK", "BUY_CRYPTO", "SELL_CRYPTO"):
         notional = float(decision.get("notional", 1000))
-        notional = min(notional, 1000)  # hard cap $1,000 por trade
+        notional = min(notional, 1000)  # hard cap $1,000 per trade
 
         if buying_power < notional:
             log.warning(f"execute_decision: buying_power ${buying_power:.0f} < ${notional:.0f}")
@@ -85,7 +85,7 @@ async def execute_decision(decision: dict) -> dict:
         log.info(f"execute_decision: {action} {symbol} ${notional:.0f} → order_id={order_id}")
         return {"executed": bool(order_id), "order_id": order_id, "order": result}
 
-    # ── Opciones ───────────────────────────────────────────────────────────────
+    # ── Options ────────────────────────────────────────────────────────────────
     contract_symbol = decision.get("contract_symbol")
     if not contract_symbol:
         log.error(f"Missing contract_symbol in options decision: {decision}")
@@ -117,7 +117,7 @@ async def execute_decision(decision: dict) -> dict:
     return {"executed": bool(order_id), "order_id": order_id, "order": result}
 
 
-# ─── Loop 1: Claude Brain (cada 60 min) ──────────────────────────────────────
+# ─── Loop 1: Claude Brain (every 15 min) ─────────────────────────────────────
 
 async def claude_brain_loop():
     log.info(f"Claude Brain loop started — every {CLAUDE_CYCLE_MINUTES} min")
@@ -131,12 +131,12 @@ async def claude_brain_loop():
         await asyncio.sleep(CLAUDE_CYCLE_MINUTES * 60)
 
 
-# ─── Loop 2: Monitor Python (cada 30s, sin Claude) ───────────────────────────
+# ─── Loop 2: Python Monitor (every 30s, without Claude) ──────────────────────
 
 _vfz_cache: dict = {}
 _vfz_cache_ts: float = 0.0
 _VFZ_REFRESH_SECS = 60.0
-_sold_cooldown: dict = {}  # sym → timestamp, evita doble-venta mientras Alpaca procesa
+_sold_cooldown: dict = {}  # sym → timestamp, prevents double-sell while Alpaca processes
 _SELL_COOLDOWN_SECS = 90.0
 
 
@@ -145,7 +145,7 @@ async def monitor_loop():
     log.info(f"Monitor loop started — every {MONITOR_INTERVAL}s")
     while state["running"]:
         try:
-            # Refresh VFZ signals every 60s (lightweight, solo localhost)
+            # Refresh VFZ signals every 60s (lightweight, localhost only)
             if time.time() - _vfz_cache_ts > _VFZ_REFRESH_SECS:
                 try:
                     sig = await collect_signals()
@@ -155,7 +155,7 @@ async def monitor_loop():
                     log.debug(f"VFZ refresh: {e}")
 
             positions = await alpaca.get_positions()
-            # Solo actualizar cache si la respuesta es válida (no vacía por error transitorio)
+            # Only update cache if response is valid (not empty due to transient error)
             acc_lmv = float((await alpaca.get_account()).get("long_market_value", 1))
             if positions or acc_lmv == 0:
                 state["positions"] = positions
@@ -168,16 +168,16 @@ async def monitor_loop():
                 if avg_in == 0 or qty == 0:
                     continue
 
-                # Skip si vendimos este símbolo recientemente (evita doble-orden mientras Alpaca procesa)
+                # Skip if recently sold (prevents double-order while Alpaca processes)
                 if time.time() - _sold_cooldown.get(sym, 0) < _SELL_COOLDOWN_SECS:
                     continue
 
-                # Usar current_price y unrealized_plpc de Alpaca directamente
-                # (evita discrepancia entre IEX quote mid y precio real de Alpaca)
+                # Use current_price and unrealized_plpc directly from Alpaca
+                # (avoids discrepancy between IEX quote mid and Alpaca's real price)
                 current = float(pos.get("current_price", 0)) or None
                 pnl_pct = float(pos.get("unrealized_plpc", 0))
                 if not current:
-                    # Fallback: calcular desde unrealized_plpc
+                    # Fallback: calculate from unrealized_plpc
                     current = avg_in * (1 + pnl_pct) if pnl_pct else None
                     if not current:
                         continue
@@ -189,7 +189,7 @@ async def monitor_loop():
 
                 asset_class = pos.get("asset_class", "")
 
-                # VFZ SELL exit: si VFZ dice SELL y la posición pierde → salir sin esperar -3%
+                # VFZ SELL exit: if VFZ signals SELL and position is losing → exit immediately
                 vfz_signal = _vfz_cache.get(price_sym)
                 vfz_exit   = (vfz_signal == "SELL" and pnl_pct < 0)
 
@@ -223,7 +223,7 @@ async def monitor_loop():
         await asyncio.sleep(MONITOR_INTERVAL)
 
 
-# ─── FastAPI (Loop 3) ─────────────────────────────────────────────────────────
+# ─── FastAPI Dashboard (Loop 3) ──────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
