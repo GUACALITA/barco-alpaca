@@ -31,23 +31,35 @@ BRAIN_URL = os.environ.get("META_BRAIN_URL", "http://localhost:30843") + "/api/s
 S2_URL    = os.environ.get("S2_URL",         "http://localhost:30841") + "/api/status"
 S3_URL    = os.environ.get("S3_URL",         "http://localhost:30842") + "/api/status"
 
-OPTIMAL_THRESHOLD = 0.35
+OPTIMAL_THRESHOLD = 0.20   # lowered from 0.35 — previous value was unreachable with typical S2 noise
 AVOID_THRESHOLD   = -0.25
+
+# VFZ quantum override: if IBM-validated signals show strong BUY consensus + positive
+# sentiment, trust the quantum signal directly rather than waiting for S2 alignment.
+VFZ_QUANTUM_BUY_RATIO = 0.60  # >= 60% of active VFZ signals must be BUY
+VFZ_QUANTUM_FNG_MIN   = 50    # Fear & Greed must be at or above neutral
 
 
 def _local_meta(vfz_signals: dict, s2_data: dict, s3_data: dict,
                 brain_inputs: dict = None) -> tuple:
     """
     Computes a local score from VFZ + S2 + S3 (excludes S1 Binance arbitrage).
-    VecFrachZ is not considered by Meta-Brain — added here instead.
+    VecFrachZ signals are quantum-validated (IBM hardware, alpha=2.1875, 0% BER).
 
-    Uses Meta-Brain avg_pressure when S2 ok=True (more stable reading).
+    Weights: VFZ=40%, S2=25%, S3=35%
+    S2 weight reduced (noisy short-term signal). VFZ and S3 weighted more.
+
+    VFZ quantum override: if VFZ BUY ratio >= 60% AND F&G >= 50 AND not in AVOID,
+    force OPTIMAL — these are the most trustworthy signals in the system.
+
     Returns (label: str, score: float)
     """
-    # VFZ: BUY ratio vs total → -1..+1
-    total = len(vfz_signals)
-    buys  = sum(1 for v in vfz_signals.values() if v == "BUY")
-    vfz_score = ((buys / total) * 2 - 1) if total else 0.0
+    # VFZ: only count active signals (BUY or SELL), exclude HOLD
+    active = {k: v for k, v in vfz_signals.items() if v in ("BUY", "SELL")}
+    total  = len(active) if active else len(vfz_signals)
+    buys   = sum(1 for v in vfz_signals.values() if v == "BUY")
+    vfz_score  = ((buys / total) * 2 - 1) if total else 0.0
+    buy_ratio  = buys / total if total else 0.0
 
     # S2: prefer Meta-Brain avg (more stable) when available
     brain_s2  = (brain_inputs or {}).get("s2", {})
@@ -63,9 +75,20 @@ def _local_meta(vfz_signals: dict, s2_data: dict, s3_data: dict,
                  else s3_data.get("fng_value") or s3_data.get("fear_greed"))
     s3_score  = ((fng - 50) / 50) if fng is not None else 0.0
 
-    # Weights: VFZ=30%, S2=40%, S3=30%  (S1 Binance arbitrage excluded)
-    score = vfz_score * 0.30 + s2_score * 0.40 + s3_score * 0.30
+    # Weights: VFZ=40%, S2=25%, S3=35%
+    score = vfz_score * 0.40 + s2_score * 0.25 + s3_score * 0.35
     score = max(-1.0, min(1.0, score))
+
+    # VFZ quantum override: IBM-validated majority BUY + positive market sentiment
+    fng_val = fng if fng is not None else 50
+    if (buy_ratio >= VFZ_QUANTUM_BUY_RATIO
+            and fng_val >= VFZ_QUANTUM_FNG_MIN
+            and score > AVOID_THRESHOLD):
+        log.info(
+            f"VFZ quantum override: buy_ratio={buy_ratio:.2f} F&G={fng_val} "
+            f"raw_score={score:.3f} → forcing OPTIMAL"
+        )
+        return "OPTIMAL", round(max(score, OPTIMAL_THRESHOLD + 0.05), 3)
 
     if score >= OPTIMAL_THRESHOLD:
         label = "OPTIMAL"
